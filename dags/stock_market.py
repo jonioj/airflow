@@ -4,7 +4,7 @@ from datetime import datetime
 from airflow.hooks.base import BaseHook
 from airflow.sensors.base import PokeReturnValue
 import requests
-from include.stock_market.tasks import _get_stock_prices
+from include.stock_market.tasks import _get_stock_prices, _store_prices
 
 
 @dag(
@@ -29,7 +29,14 @@ def stock_market():
         op_kwargs={
             'url': '{{task_instance.xcom_pull(task_ids="is_api_avaiable")}}'}
     )
-    is_api_avaiable() >> get_stock_prices
+
+    store_prices = PythonOperator(
+        task_id="store_prices",
+        python_callable=_store_prices,
+        op_kwargs={
+            'stock': '{{task_instance.xcom_pull(task_ids="get_stock_prices")}}'}
+    )
+    is_api_avaiable() >> get_stock_prices >> store_prices
 
 
 stock_market()
