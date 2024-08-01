@@ -1,8 +1,11 @@
+from datetime import datetime
+import pandas as pd
 import requests
 from airflow.hooks.base import BaseHook
 import json
 from minio import Minio
 from io import BytesIO
+import pandas as pd
 
 
 def _get_stock_prices(url):
@@ -33,3 +36,31 @@ def _store_prices(stock):
         length=len(data)
     )
     return f'{objw.bucket_name}/{symbol}'
+
+
+def _transform_data():
+
+    minio = BaseHook.get_connection('minio')
+    client = Minio(
+        endpoint=minio.extra_dejson['endpoint_url'].split('//')[1],
+        access_key=minio.login,
+        secret_key=minio.password,
+        secure=False
+    )
+    # Getting the obj
+    response = client.get_object('stock-market', 'NVDA/prices.json')
+    data = response.read()
+    content = data.decode('utf-8')
+    data = json.loads(content)
+    # Formatting the obj
+    timestamps = data['timestamp']
+    df = pd.DataFrame(data['indicators']['quote'][0])
+    df['timestamp'] = list(
+        map(lambda x: datetime.fromtimestamp(x,), timestamps))
+    df['timestamp'] = df['timestamp'].dt.date
+    # Writing the obj
+    csv_buffer = BytesIO()
+    df.to_csv(csv_buffer, index=False)
+    csv_buffer.seek(0)
+    client.put_object('stock-market', 'formated.csv',
+                      csv_buffer, len(csv_buffer.getvalue()))
