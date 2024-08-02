@@ -5,9 +5,11 @@ from airflow.hooks.base import BaseHook
 import json
 from minio import Minio
 from io import BytesIO
+from airflow.decorators import task
 import pandas as pd
 
 
+@task
 def _get_stock_prices(url):
     url = f"{url}?metrics=high&interval=1d&range=1y"
     api = BaseHook.get_connection("stock_api")
@@ -15,6 +17,7 @@ def _get_stock_prices(url):
     return json.dumps(response.json()['chart']['result'][0])
 
 
+@task
 def _store_prices(stock):
     minio = BaseHook.get_connection('minio')
     client = Minio(
@@ -38,7 +41,8 @@ def _store_prices(stock):
     return f'{objw.bucket_name}/{symbol}'
 
 
-def _transform_data():
+@task
+def _transform_data(objw_url):
 
     minio = BaseHook.get_connection('minio')
     client = Minio(
@@ -48,19 +52,18 @@ def _transform_data():
         secure=False
     )
     # Getting the obj
-    response = client.get_object('stock-market', 'NVDA/prices.json')
+    bucket_name, ticker = objw_url.split('/')
+    response = client.get_object(bucket_name, f'{ticker}/prices.json')
     data = response.read()
     content = data.decode('utf-8')
     data = json.loads(content)
     # Formatting the obj
     timestamps = data['timestamp']
     df = pd.DataFrame(data['indicators']['quote'][0])
-    df['timestamp'] = list(
-        map(lambda x: datetime.fromtimestamp(x,), timestamps))
+    df['timestamp'] = list(map(lambda x: datetime.fromtimestamp(x,), timestamps))
     df['timestamp'] = df['timestamp'].dt.date
     # Writing the obj
     csv_buffer = BytesIO()
     df.to_csv(csv_buffer, index=False)
     csv_buffer.seek(0)
-    client.put_object('stock-market', 'formated.csv',
-                      csv_buffer, len(csv_buffer.getvalue()))
+    client.put_object(bucket_name, f'{ticker}_formated.csv', csv_buffer, len(csv_buffer.getvalue()))
