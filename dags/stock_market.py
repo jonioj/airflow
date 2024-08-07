@@ -4,7 +4,7 @@ from airflow.hooks.base import BaseHook
 from airflow.sensors.base import PokeReturnValue
 from airflow.providers.docker.operators.docker import DockerOperator
 import requests
-from include.stock_market.tasks import _get_stock_prices, _store_prices, _transform_data
+from include.stock_market.tasks import get_stock_prices, store_prices, _transform_data
 
 
 @dag(
@@ -34,14 +34,14 @@ def stock_market(stock="NVDA"):
         xcom_all=False,
         mount_tmp_dir=False,
         environment={
-            'SPARK_APPLICATION_ARGS': 'stock-market/AAPL/'
+            'SPARK_APPLICATION_ARGS':'{{ ti.xcom_pull(task_ids = "store_prices") }}'
         }
         
     )
 
     url = is_api_avaiable(stock)
-    prices = _get_stock_prices(url)
-    objw_url = _store_prices(prices) >> format_prices
-
+    prices = get_stock_prices(url)
+    objw_url = store_prices(prices)
+    objw_url >> format_prices
 
 stock_market()

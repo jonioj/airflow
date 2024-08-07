@@ -10,15 +10,15 @@ import pandas as pd
 
 
 @task
-def _get_stock_prices(url):
+def get_stock_prices(url):
     url = f"{url}?metrics=high&interval=1d&range=1y"
     api = BaseHook.get_connection("stock_api")
     response = requests.get(url, headers=api.extra_dejson['headers'])
     return json.dumps(response.json()['chart']['result'][0])
 
 
-@task
-def _store_prices(stock):
+@task()
+def store_prices(stock):
     minio = BaseHook.get_connection('minio')
     client = Minio(
         endpoint=minio.extra_dejson['endpoint_url'].split('//')[1],
@@ -38,7 +38,7 @@ def _store_prices(stock):
         data=BytesIO(data),
         length=len(data)
     )
-    return f'{objw.bucket_name}/{symbol}'
+    return f'{objw.bucket_name}/{symbol}/'
 
 
 @task
