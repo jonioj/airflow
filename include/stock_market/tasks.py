@@ -8,6 +8,18 @@ from io import BytesIO
 from airflow.decorators import task
 import pandas as pd
 
+BUCKET_NAME = 'stock-market'
+
+
+def get_minio_client():
+    minio = BaseHook.get_connection('minio')
+    client = Minio(
+        endpoint=minio.extra_dejson['endpoint_url'].split('//')[1],
+        access_key=minio.login,
+        secret_key=minio.password,
+        secure=False
+    )
+    return client
 
 @task
 def get_stock_prices(url):
@@ -19,21 +31,14 @@ def get_stock_prices(url):
 
 @task()
 def store_prices(stock):
-    minio = BaseHook.get_connection('minio')
-    client = Minio(
-        endpoint=minio.extra_dejson['endpoint_url'].split('//')[1],
-        access_key=minio.login,
-        secret_key=minio.password,
-        secure=False
-    )
-    bucket_name = 'stock-market'
-    if not client.bucket_exists(bucket_name):
-        client.make_bucket(bucket_name)
+    client = get_minio_client()
+    if not client.bucket_exists(BUCKET_NAME):
+        client.make_bucket(BUCKET_NAME)
     stock = json.loads(stock)
     symbol = stock['meta']['symbol']
     data = json.dumps(stock, ensure_ascii=False).encode('utf8')
     objw = client.put_object(
-        bucket_name=bucket_name,
+        bucket_name=BUCKET_NAME,
         object_name=f"{symbol}/prices.json",
         data=BytesIO(data),
         length=len(data)
@@ -44,13 +49,7 @@ def store_prices(stock):
 @task
 def _transform_data(objw_url):
 
-    minio = BaseHook.get_connection('minio')
-    client = Minio(
-        endpoint=minio.extra_dejson['endpoint_url'].split('//')[1],
-        access_key=minio.login,
-        secret_key=minio.password,
-        secure=False
-    )
+    client = get_minio_client()
     # Getting the obj
     bucket_name, ticker = objw_url.split('/')
     response = client.get_object(bucket_name, f'{ticker}/prices.json')
@@ -67,3 +66,14 @@ def _transform_data(objw_url):
     df.to_csv(csv_buffer, index=False)
     csv_buffer.seek(0)
     client.put_object(bucket_name, f'{ticker}_formated.csv', csv_buffer, len(csv_buffer.getvalue()))
+    
+@task
+def get_formatted_csv(path):
+    client = get_minio_client()
+    prefix = f'{path.split("/")[1]}/formatted_prices/'
+    objects = client.list_objects(BUCKET_NAME,prefix=prefix,recursive=True)
+    for obj in objects:
+        if obj.object_name.endswith('.csv'):
+            data = client.get_object(BUCKET_NAME,obj.object_name)
+            
+    
