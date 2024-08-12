@@ -7,6 +7,7 @@ from minio import Minio
 from io import BytesIO
 from airflow.decorators import task
 import pandas as pd
+from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 
 BUCKET_NAME = 'stock-market'
 
@@ -74,6 +75,22 @@ def get_formatted_csv(path):
     objects = client.list_objects(BUCKET_NAME,prefix=prefix,recursive=True)
     for obj in objects:
         if obj.object_name.endswith('.csv'):
-            data = client.get_object(BUCKET_NAME,obj.object_name)
-            
+            return obj.object_name
+  
+create_table= SQLExecuteQueryOperator(
+        task_id="create_table",
+        sql="""
+        CREATE TABLE IF NOT EXISTS stock_market (
+        timestamp TIMESTAMP,
+        close NUMERIC,
+        high NUMERIC,
+        low NUMERIC,
+        open NUMERIC,
+        volume BIGINT,
+        date DATE);
+        """,
+        conn_id="postgres",
+        split_statements=True,
+        return_last=False,
+    )
     

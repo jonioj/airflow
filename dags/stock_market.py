@@ -4,10 +4,11 @@ from airflow.hooks.base import BaseHook
 from airflow.sensors.base import PokeReturnValue
 from airflow.providers.docker.operators.docker import DockerOperator
 import requests
-from include.stock_market.tasks import get_stock_prices, store_prices,  get_formatted_csv
+from include.stock_market.tasks import get_stock_prices, store_prices,  get_formatted_csv, BUCKET_NAME
 from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
-
-
+from astro.files import File
+from astro.sql.table import Table, Metadata
+from astro import sql as aql
 @dag(
     start_date=datetime(2023, 1, 1),
     catchup=False,
@@ -23,22 +24,7 @@ def stock_market(stock="NVDA"):
         condition = response.status_code == 200
         return PokeReturnValue(is_done=condition, xcom_value=url)
     
-    create_table= SQLExecuteQueryOperator(
-        task_id="create_table",
-        sql="""
-        CREATE TABLE IF NOT EXISTS financial_data (
-        timestamp TIMESTAMP,
-        close NUMERIC,
-        high NUMERIC,
-        low NUMERIC,
-        open NUMERIC,
-        volume BIGINT,
-        date DATE);
-        """,
-        conn_id="postgres",
-        split_statements=True,
-        return_last=False,
-    )
+    
     
     format_prices = DockerOperator(
         task_id='format_prices',
@@ -56,10 +42,16 @@ def stock_market(stock="NVDA"):
         }
         
     )
-    create_table
+    
+    load_to_dw = aql.load_file(
+        task_id='load_to_dw',
+        input_file=File(path=f"s3://{BUCKET_NAME}/{{{{ ti.xcom_pull(task_ids = 'get_formatted_csv') }}}}", conn_id = 'minio'),
+        output_table=Table('stock_market', conn_id='postgres',metadata =Metadata(schema='public'))
+    )
+    
     url = is_api_avaiable(stock)
     prices = get_stock_prices(url)
-    objw_url = store_prices(prices) >>  get_formatted_csv('{{ ti.xcom_pull(task_ids = "store_prices") }}')
+    store_prices(prices) >> format_prices >>  get_formatted_csv('{{ ti.xcom_pull(task_ids = "store_prices") }}') >> load_to_dw
     
    
     
